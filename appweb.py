@@ -2,76 +2,64 @@ import streamlit as st
 import pandas as pd
 from docx import Document
 from io import BytesIO
-import copy
 
-st.set_page_config(page_title="نظام مدرسة الإمام النووي", layout="centered")
+# إعدادات واجهة البرنامج
+st.set_page_config(page_title="نظام النماذج الموحد", layout="centered")
 st.title("📝 مدرسة الإمام النووي")
-st.subheader("تصدير النماذج المكتملة في ملف واحد")
+st.subheader("تصدير نماذج الطلاب المحددين في ملف واحد")
 
+# 1. رفع ملف الإكسل
 uploaded_excel = st.file_uploader("ارفع ملف الطلاب (Excel)", type=["xlsx"])
 
 if uploaded_excel:
     try:
         df = pd.read_excel(uploaded_excel)
-        cols = df.columns.tolist()
         
-        col1, col2 = st.columns(2)
-        with col1:
-            name_col = st.selectbox("اختر عمود الأسماء:", cols)
-        with col2:
-            class_col = st.selectbox("اختر عمود الصفوف:", cols)
+        # اختيار الطلاب (يمكن اختيار أكثر من اسم)
+        selected_students = st.multiselect("اختر الطلاب المراد تصدير نماذجهم:", df['اسم الطالب'].tolist())
         
-        df['display'] = df[name_col].astype(str) + " - " + df[class_col].astype(str)
-        selected_display = st.multiselect("اختر الطلاب:", df['display'].tolist())
-        reason = st.text_input("التاريخ (أو بيانات إضافية لرمز [T]):")
+        # إدخال سبب النموذج
+        reason = st.text_input("سبب النموذج (سيطبق على جميع المختارين):")
 
-        if st.button("🚀 إنشاء وتحميل الملف الموحد"):
-            if not selected_display:
-                st.error("الرجاء اختيار طلاب")
+        if st.button("تجهيز الملف الموحد"):
+            if not selected_students:
+                st.error("الرجاء اختيار طالب واحد على الأقل.")
+            elif not reason:
+                st.warning("الرجاء كتابة السبب.")
             else:
+                # إنشاء مستند جديد لجمع كل الصفحات فيه
                 combined_doc = Document()
-                selected_df = df[df['display'].isin(selected_display)]
                 
-                for index, (idx, row) in enumerate(selected_df.iterrows()):
-                    # فتح القالب الأصلي لكل طالب
+                for i, name in enumerate(selected_students):
+                    # فتح قالب الوورد لكل طالب
                     template = Document("template.docx")
                     
-                    # دالة الاستبدال داخل النصوص والجداول
-                    def replace_in_doc(doc):
-                        # استبدال في الفقرات
-                        for p in doc.paragraphs:
-                            if '[A]' in p.text: p.text = p.text.replace('[A]', str(row[name_col]))
-                            if '[B]' in p.text: p.text = p.text.replace('[B]', str(row[class_col]))
-                            if '[T]' in p.text: p.text = p.text.replace('[T]', reason)
-                        # استبدال في الجداول (ضروري لقالبك)
-                        for table in doc.tables:
-                            for r_obj in table.rows:
-                                for cell in r_obj.cells:
-                                    for paragraph in cell.paragraphs:
-                                        if '[A]' in paragraph.text: paragraph.text = paragraph.text.replace('[A]', str(row[name_col]))
-                                        if '[B]' in paragraph.text: paragraph.text = paragraph.text.replace('[B]', str(row[class_col]))
-                                        if '[T]' in paragraph.text: paragraph.text = paragraph.text.replace('[T]', reason)
-
-                    replace_in_doc(template)
+                    # استبدال الكلمات المحجوزة
+                    for p in template.paragraphs:
+                        if '[A]' in p.text:
+                            p.text = p.text.replace('[A]', name)
+                        if '[T]' in p.text:
+                            p.text = p.text.replace('[T]', reason)
                     
-                    # نقل جميع محتويات القالب (جداول وفقرات) للمستند الموحد
+                    # إضافة محتوى القالب المعدل للمستند الرئيسي
                     for element in template.element.body:
                         combined_doc.element.body.append(element)
                     
-                    # إضافة فاصل صفحات
-                    if index < len(selected_df) - 1:
+                    # إضافة فاصل صفحات إلا بعد الطالب الأخير
+                    if i < len(selected_students) - 1:
                         combined_doc.add_page_break()
 
-                # حفظ وتنزيل
-                target_file = BytesIO()
-                combined_doc.save(target_file)
-                target_file.seek(0)
+                # حفظ الملف الموحد في الذاكرة
+                file_stream = BytesIO()
+                combined_doc.save(file_stream)
+                file_stream.seek(0)
 
-                st.success(f"✅ تم دمج {len(selected_display)} نماذج بنجاح!")
+                st.success(f"تم بنجاح تجهيز نماذج ({len(selected_students)}) طلاب في ملف واحد.")
                 st.download_button(
-                    label="📥 تحميل الملف الموحد",
-                    data=target_file,
-                    file_name="النماذج_النهائية.docx"
+                    label="📥 تحميل ملف النماذج الموحد (Word)",
+                    data=file_stream,
+                    file_name="نماذج_الطلاب_الموحدة.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
     except Exception as e:
-        st.error(f"حدث خطأ: {e}")
+        st.error(f"حدث خطأ في قراءة الملف: {e}")

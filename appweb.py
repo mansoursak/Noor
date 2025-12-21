@@ -1,110 +1,64 @@
 import streamlit as st
 import pandas as pd
 from docx import Document
-from docx.shared import Pt
-import io
-from datetime import datetime
+from io import BytesIO
 
-# 1. دالة قوية لتحويل الأرقام وإجبارها على التنسيق الإنجليزي
-def force_english_numbers(text):
-    arabic_numbers = "٠١٢٣٤٥٦٧٨٩"
-    english_numbers = "0123456789"
-    translation_table = str.maketrans(arabic_numbers, english_numbers)
-    return str(text).translate(translation_table)
+# إعداد واجهة البرنامج
+st.set_page_config(page_title="نظام النماذج الموحد", layout="centered")
+st.title("📝 مدرسة الإمام النووي")
+st.subheader("تصدير جميع الطلاب المحددين في ملف واحد")
 
-# إعداد واجهة التطبيق
-st.set_page_config(page_title="نظام النماذج الذكي", layout="wide")
-st.title("🎓 نظام إصدار النماذج - مدرسة الإمام النووي")
+# 1. رفع ملف الإكسل
+uploaded_excel = st.file_uploader("ارفع ملف الطلاب (Excel)", type=["xlsx"])
 
-# 2. منطقة رفع الملفات
-col1, col2 = st.columns(2)
-with col1:
-    up_excel = st.file_uploader("1. ارفع ملف الطلاب (Excel)", type="xlsx")
-with col2:
-    up_template = st.file_uploader("2. ارفع نموذج الوورد (Word)", type="docx")
-
-if up_excel and up_template:
-    # قراءة أسماء الفصول كما هي في الإكسل
-    excel_data = pd.ExcelFile(up_excel)
-    sheet_names = excel_data.sheet_names 
+if uploaded_excel:
+    df = pd.read_excel(uploaded_excel)
     
-    st.divider()
+    # اختيار الطلاب
+    selected_students = st.multiselect("اختر الطلاب (يمكنك اختيار الجميع):", df['اسم الطالب'].tolist())
     
-    # 3. واجهة مدخلات المستخدم
-    col_input1, col_input2 = st.columns(2)
-    with col_input1:
-        selected_sheet = st.selectbox("📁 اختر الفصل الدراسي:", sheet_names)
-        df = pd.read_excel(up_excel, sheet_name=selected_sheet)
-        selected_students = st.multiselect("👥 اختر الطلاب المطلوبين:", df['الاسم'].tolist())
+    # اختيار نوع المخالفة
+    reason = st.text_input("سبب النموذج (مثال: تأخر عن الطابور):")
 
-    with col_input2:
-        reasons_list = st.multiselect(
-            "أسباب التحويل (سيتم وضع ✔️ في المربعات):", 
-            ["عدم أداء الواجب", "ضعف دراسي", "مشاغبة", "تأخر عن الحصة", "أخرى"]
-        )
-        other_text = st.text_input("في حال اخترت 'أخرى' اذكر السبب هنا [F]:")
-
-    # 4. بيانات إضافية
-    st.subheader("✍️ تعبئة بيانات النموذج")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        problem_desc = st.text_area("إيضاح المشكلة [S]:")
-    with col_b:
-        # توليد التاريخ وتحويل أرقامه فوراً
-        today_raw = datetime.now().strftime("%d / %m / 1446 هـ")
-        today_auto = force_english_numbers(today_raw)
-        doc_date = st.text_input("التاريخ [T]:", value=today_auto)
-
-    if st.button("🚀 إنشاء وتحميل النماذج"):
+    if st.button("تجهيز ملف PDF الموحد"):
         if not selected_students:
-            st.warning("يرجى اختيار طالب واحد على الأقل.")
+            st.error("الرجاء اختيار طالب واحد على الأقل")
         else:
-            # تنظيف التاريخ قبل الاستخدام
-            final_date = force_english_numbers(doc_date)
+            # فتح القالب المرفوع على GitHub
+            # تأكد أن ملف template.docx موجود في نفس المجلد على GitHub
             
-            for student_name in selected_students:
-                doc = Document(up_template)
-                check_mark = "✔️"
+            output_doc = Document() # إنشاء مستند جديد للدمج
+            
+            for index, name in enumerate(selected_students):
+                # فتح نسخة من القالب لكل طالب
+                template = Document("template.docx")
                 
-                # قاموس الاستبدال بالحروف الإنجليزية (A, B, C...)
-                replacements = {
-                    "[A]": str(student_name),
-                    "[B]": str(selected_sheet),
-                    "[S]": problem_desc,
-                    "[T]": final_date,
-                    "[F]": other_text,
-                    "[C]": check_mark if "عدم أداء الواجب" in reasons_list else "  ",
-                    "[D]": check_mark if "ضعف دراسي" in reasons_list else "  ",
-                    "[E]": check_mark if "مشاغبة" in reasons_list else "  ",
-                    "[G]": check_mark if "تأخر عن الحصة" in reasons_list else "  ",
-                    "[R]": check_mark if "أخرى" in reasons_list else "  ",
-                }
+                # استبدال البيانات في القالب
+                for p in template.paragraphs:
+                    if '[A]' in p.text:
+                        p.text = p.text.replace('[A]', name)
+                    if '[T]' in p.text:
+                        p.text = p.text.replace('[T]', reason)
                 
-                # وظيفة الاستبدال الذكية للحفاظ على التنسيق واللون
-                def process_content(target):
-                    for paragraph in target.paragraphs:
-                        for key, value in replacements.items():
-                            if key in paragraph.text:
-                                for run in paragraph.runs:
-                                    if key in run.text:
-                                        run.text = run.text.replace(key, value)
-                                        # حل مشكلة الأرقام: منع تحويلها لهندية (عربية)
-                                        run.font.complex_script = False
+                # إضافة محتوى القالب المعدل إلى المستند الرئيسي
+                for element in template.element.body:
+                    output_doc.element.body.append(element)
+                
+                # إضافة فاصل صفحات بين الطلاب (إلا الطالب الأخير)
+                if index < len(selected_students) - 1:
+                    output_doc.add_page_break()
 
-                # تنفيذ العملية على النصوص والجداول
-                process_content(doc)
-                for table in doc.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            process_content(cell)
-                
-                # حفظ الملف في الذاكرة للتحميل
-                target_stream = io.BytesIO()
-                doc.save(target_stream)
-                st.download_button(
-                    label=f"⬇️ تحميل نموذج: {student_name}",
-                    data=target_stream.getvalue(),
-                    file_name=f"نموذج_{student_name}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-            st.success("✅ تم الانتهاء! النماذج جاهزة الآن مع الحفاظ على الخطوط والأرقام.")
+            # حفظ الملف الموحد في الذاكرة
+            target_file = BytesIO()
+            output_doc.save(target_file)
+            target_file.seek(0)
+
+            st.success(f"تم تجهيز نماذج ({len(selected_students)}) طلاب بنجاح!")
+            st.download_button(
+                label="تحميل الملف الموحد (Word)",
+                data=target_file,
+                file_name="جميع_النماذج.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+
+st.info("ملاحظة: بعد تحميل الملف، افتحه من جوالك واختر (طباعة -> حفظ كـ PDF) للحصول على ملف واحد بصيغة PDF.")
